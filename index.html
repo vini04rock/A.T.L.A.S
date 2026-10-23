@@ -44,9 +44,9 @@
   <div class="fala" id="fala"></div>
   <div class="nota" id="nota"></div>
 <script>
-  // Teste 5 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
-  // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para ser
-  // transcrito na Carteira (Whisper, na Groq). Por enquanto só repete o que ouviu.
+  // A.T.L.A.S.: conversa contínua por voz com a Casa. No computador (Chrome) o próprio navegador reconhece a voz; no
+  // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para a Carteira,
+  // que transcreve (Whisper, na Groq) e responde pelo mesmo cérebro da Siri (Voz.js). Ao abrir, ele cumprimenta.
   const VOZ_URL = 'https:/' + '/script.google.com/macros/s/AKfycby_BLepVFo1I3dpCglAWf_1HNjwlLuhlvj2p8RDR5r5KOoR2tbLPlS6G-ECN8wEvW7uRA/exec';
   const $ = id => document.getElementById(id);
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -54,7 +54,9 @@
   const guardar = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* sem guardar */ } };
   const ler = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
   let chave = ler('atlas-k');
-  let conversando = false, falando = false;
+  let conversando = false, falando = false, nome = ler('atlas-nome');
+  const FIM_CONVERSA = /\b(tchau|ate mais|ate logo|ate depois|pode parar|encerrar|desligar)\b/;
+  const semAcento = x => String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   function estado(t, classe) { $('estado').textContent = t; $('circulo').className = 'circulo' + (classe ? ' ' + classe : ''); }
   function nota(t) { $('nota').textContent = t; }
@@ -81,18 +83,49 @@
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
-    const voz = speechSynthesis.getVoices().find(v => /^pt(-|_)BR/i.test(v.lang));
+    const voz = vozPortugues();
     if (voz) f.voice = voz;
     f.onend = fim; f.onerror = fim;
     estado('Falando…', 'falando');
     speechSynthesis.speak(f);
   }
 
-  // ---------- o que fazer com o que ouviu (no teste: repetir) ----------
-  function responder(texto, depois) {
-    mostrarFala('Você', texto);
-    if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) { parar(); falar('Até mais!', () => estado('Toque no círculo para começar')); return; }
-    falar('Você disse: ' + texto, depois);
+  /** A voz em português: a "Melhorada" (ou Premium) quando foi baixada no aparelho; senão, a primeira pt-BR. */
+  function vozPortugues() {
+    const vozes = speechSynthesis.getVoices().filter(v => /^pt(-|_)BR/i.test(v.lang));
+    return vozes.find(v => /melhorad|aprimorad|enhanced|premium/i.test(v.name)) || vozes.find(v => /luciana/i.test(v.name)) || vozes[0] || null;
+  }
+  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+
+  // ---------- a conversa: manda à Carteira o que ouviu (texto ou áudio) e fala a resposta ----------
+  function despedir() {
+    parar();
+    falar(['Até mais', 'Até logo', 'Falou'][Math.floor(Math.random() * 3)] + (nome ? ', ' + nome : '') + '!', () => estado('Toque no círculo para começar'));
+  }
+
+  function pensar(corpo, depois) {
+    enviando = true;
+    estado('Pensando…', 'pensando');
+    fetch(VOZ_URL, { method: 'POST', body: JSON.stringify(Object.assign({ app: 'atlas', k: chave }, corpo)) })
+      .then(r => r.json())
+      .then(r => {
+        enviando = false;
+        if (r.nome) { nome = r.nome; guardar('atlas-nome', nome); }
+        if (r.erro) {
+          nota(r.erro);
+          if (/chave/i.test(r.erro)) { chave = ''; guardar('atlas-k', null); pedirChave(); parar(); return; }
+          depois && depois(); return;
+        }
+        nota('');
+        if (r.texto) {
+          mostrarFala('Você', r.texto);
+          if (FIM_CONVERSA.test(semAcento(r.texto))) { despedir(); return; }
+        }
+        if (!r.fala) { depois && depois(); return; }
+        $('fala').innerHTML += '<small style="margin-top:14px">Atlas</small>' + String(r.fala).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        falar(r.fala, depois);
+      })
+      .catch(e => { enviando = false; nota('Sem conexão com a Casa: ' + e.message); depois && depois(); });
   }
 
   // ---------- modo 1: o navegador reconhece (Chrome do computador) ----------
@@ -104,7 +137,10 @@
       if (falando) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript.trim();
-        if (ev.results[i].isFinal) { if (t) responder(t, () => conversando && estado('Ouvindo…', 'ouvindo')); }
+        if (ev.results[i].isFinal && t) {
+          if (FIM_CONVERSA.test(semAcento(t))) { mostrarFala('Você', t); despedir(); return; }
+          pensar({ t }, () => conversando && estado('Ouvindo…', 'ouvindo'));
+        }
         else mostrarFala('Você', t);
       }
     };
@@ -116,7 +152,7 @@
     rec.onend = () => { if (conversando && rec) try { rec.start(); } catch (e) { /* tenta no próximo toque */ } };
     rec.start();
     estado('Ouvindo…', 'ouvindo');
-    nota('Modo: reconhecimento do navegador. Diga "tchau" para parar.');
+    nota('');
   }
 
   // ---------- modo 2: gravar e transcrever (iPhone) ----------
@@ -197,21 +233,9 @@
 
   function transcrever(blob) {
     enviando = true;
-    estado('Entendendo…', 'pensando');
+    estado('Pensando…', 'pensando');
     const leitor = new FileReader();
-    leitor.onload = () => {
-      const audio = String(leitor.result).split(',')[1] || '';
-      fetch(VOZ_URL, { method: 'POST', body: JSON.stringify({ app: 'atlas', k: chave, audio, tipo: blob.type, modo: 'teste' }) })
-        .then(r => r.json())
-        .then(r => {
-          enviando = false;
-          nota(diagnostico());
-          if (r.erro) { nota(r.erro); if (/chave/i.test(r.erro)) { chave = ''; guardar('atlas-k', null); pedirChave(); parar(); return; } comecarGravacao(); return; }
-          if (!r.texto) { comecarGravacao(); return; }
-          responder(r.texto, () => comecarGravacao());
-        })
-        .catch(e => { enviando = false; nota('Sem conexão com a Carteira: ' + e.message); comecarGravacao(); });
-    };
+    leitor.onload = () => pensar({ audio: String(leitor.result).split(',')[1] || '', tipo: blob.type }, () => comecarGravacao());
     leitor.readAsDataURL(blob);
   }
 
@@ -228,7 +252,6 @@
       if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* mostra no diagnóstico */ } }
       if (!conversando || falando) return;
       clearInterval(timer); timer = setInterval(vigiar, 60);
-      nota('Teste 5 · gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar. ' + diagnostico());
       comecarGravacao();
     } catch (e) {
       conversando = false;
@@ -251,7 +274,9 @@
     if (conversando) { parar(); if (window.speechSynthesis) speechSynthesis.cancel(); return; }
     conversando = true;
     if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance('')); // libera a voz no toque (iPhone)
+    $('fala').textContent = '';
     if (Reconhecimento && !ehIphone) ouvirPeloNavegador(); else ouvirGravando();
+    pensar({ inicio: true }, () => (Reconhecimento && !ehIphone) ? estado('Ouvindo…', 'ouvindo') : comecarGravacao()); // a saudação
   });
 </script>
 </body>
