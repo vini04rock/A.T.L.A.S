@@ -44,7 +44,7 @@
   <div class="fala" id="fala"></div>
   <div class="nota" id="nota"></div>
 <script>
-  // Teste 4 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
+  // Teste 5 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
   // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para ser
   // transcrito na Carteira (Whisper, na Groq). Por enquanto só repete o que ouviu.
   const VOZ_URL = 'https:/' + '/script.google.com/macros/s/AKfycby_BLepVFo1I3dpCglAWf_1HNjwlLuhlvj2p8RDR5r5KOoR2tbLPlS6G-ECN8wEvW7uRA/exec';
@@ -77,6 +77,7 @@
     if (!window.speechSynthesis || !texto) { fim(); return; }
     falando = true;
     soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
+    try { ctx && ctx.state === 'running' && ctx.suspend(); } catch (e) { /* segue */ } // o áudio da página pausa: a voz não falha
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
@@ -120,7 +121,8 @@
 
   // ---------- modo 2: gravar e transcrever (iPhone) ----------
   let fluxo = null, fonte = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null, modoGravacao = false;
-  let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false;
+  let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false, vozSeguida = 0;
+  const VOZ_MINIMA_MS = 250; // barulho curto (porta, buzina) não conta como fala
   const SILENCIO_MS = 1100, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
 
   function tipoDoAudio() {
@@ -152,7 +154,7 @@
     gravador = new MediaRecorder(fluxo, tipo ? { mimeType: tipo } : undefined);
     gravador.ondataavailable = ev => { if (ev.data && ev.data.size) pedacos.push(ev.data); };
     gravador.start();
-    inicioGravacao = Date.now(); falouAgora = false;
+    inicioGravacao = Date.now(); falouAgora = false; vozSeguida = 0;
     estado('Ouvindo…', 'ouvindo');
   }
 
@@ -179,9 +181,15 @@
     if (!conversando) return;
     if (gravador && gravador.state === 'recording' && !falando && !enviando) {
       const n = nivel(), agora = Date.now();
-      const limiar = Math.max(0.02, ruido * 3);
-      if (n > limiar) { falouAgora = true; ultimaVoz = agora; }
-      else if (!falouAgora) ruido = ruido * 0.95 + n * 0.05; // aprende o barulho do ambiente
+      const limiar = Math.max(0.025, ruido * 3.5);
+      if (n > limiar) {
+        vozSeguida += 60;
+        if (vozSeguida >= VOZ_MINIMA_MS) falouAgora = true;
+        if (falouAgora) ultimaVoz = agora;
+      } else {
+        vozSeguida = 0;
+        if (!falouAgora) ruido = ruido * 0.95 + n * 0.05; // aprende o barulho do ambiente
+      }
       if (falouAgora && (agora - ultimaVoz > SILENCIO_MS || agora - inicioGravacao > MAX_FALA_MS)) pararGravacao(true);
       else if (!falouAgora && agora - inicioGravacao > REINICIO_MS) pararGravacao(false); // só silêncio: recomeça
     }
@@ -220,7 +228,7 @@
       if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* mostra no diagnóstico */ } }
       if (!conversando || falando) return;
       clearInterval(timer); timer = setInterval(vigiar, 60);
-      nota('Teste 4 · gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar. ' + diagnostico());
+      nota('Teste 5 · gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar. ' + diagnostico());
       comecarGravacao();
     } catch (e) {
       conversando = false;
