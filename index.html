@@ -44,7 +44,7 @@
   <div class="fala" id="fala"></div>
   <div class="nota" id="nota"></div>
 <script>
-  // Teste 3 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
+  // Teste 4 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
   // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para ser
   // transcrito na Carteira (Whisper, na Groq). Por enquanto só repete o que ouviu.
   const VOZ_URL = 'https:/' + '/script.google.com/macros/s/AKfycby_BLepVFo1I3dpCglAWf_1HNjwlLuhlvj2p8RDR5r5KOoR2tbLPlS6G-ECN8wEvW7uRA/exec';
@@ -76,6 +76,7 @@
     const fim = () => { falando = false; depois && depois(); };
     if (!window.speechSynthesis || !texto) { fim(); return; }
     falando = true;
+    soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
@@ -118,7 +119,7 @@
   }
 
   // ---------- modo 2: gravar e transcrever (iPhone) ----------
-  let fluxo = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null;
+  let fluxo = null, fonte = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null, modoGravacao = false;
   let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false;
   const SILENCIO_MS = 1100, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
 
@@ -127,8 +128,25 @@
     return tipos.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
   }
 
+  /** Solta o microfone (antes de falar): para a gravação sem enviar e desliga a captura. */
+  function soltarMicrofone() {
+    if (!modoGravacao) return;
+    try { if (gravador && gravador.state !== 'inactive') { gravador.onstop = null; gravador.stop(); } } catch (e) { /* já parou */ }
+    gravador = null;
+    try { fonte && fonte.disconnect(); } catch (e) { /* já desligou */ }
+    fonte = null;
+    if (fluxo) fluxo.getTracks().forEach(tr => tr.stop());
+    fluxo = null;
+  }
+
+  function diagnostico() {
+    const tr = fluxo && fluxo.getAudioTracks()[0];
+    return 'microfone: ' + (!tr ? 'desligado' : tr.muted ? 'mudo' : tr.readyState) + ' · áudio: ' + (ctx ? ctx.state : '—');
+  }
+
   function comecarGravacao() {
-    if (!conversando || falando || enviando || !fluxo) return;
+    if (!conversando || falando || enviando) return;
+    if (!fluxo) { ouvirGravando(); return; } // depois de falar: pede o microfone de novo
     pedacos = [];
     const tipo = tipoDoAudio();
     gravador = new MediaRecorder(fluxo, tipo ? { mimeType: tipo } : undefined);
@@ -179,6 +197,7 @@
         .then(r => r.json())
         .then(r => {
           enviando = false;
+          nota(diagnostico());
           if (r.erro) { nota(r.erro); if (/chave/i.test(r.erro)) { chave = ''; guardar('atlas-k', null); pedirChave(); parar(); return; } comecarGravacao(); return; }
           if (!r.texto) { comecarGravacao(); return; }
           responder(r.texto, () => comecarGravacao());
@@ -189,16 +208,19 @@
   }
 
   async function ouvirGravando() {
+    modoGravacao = true;
     try {
-      if (!fluxo) fluxo = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      if (!ctx) {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        analisador = ctx.createAnalyser(); analisador.fftSize = 1024;
-        ctx.createMediaStreamSource(fluxo).connect(analisador);
+      if (!fluxo) {
+        fluxo = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        const tr = fluxo.getAudioTracks()[0];
+        if (tr) tr.onmute = () => nota('O iPhone deixou o microfone mudo. ' + diagnostico());
       }
-      if (ctx.state === 'suspended') await ctx.resume();
+      if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); analisador = ctx.createAnalyser(); analisador.fftSize = 1024; }
+      if (!fonte) { fonte = ctx.createMediaStreamSource(fluxo); fonte.connect(analisador); }
+      if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) { /* mostra no diagnóstico */ } }
+      if (!conversando || falando) return;
       clearInterval(timer); timer = setInterval(vigiar, 60);
-      nota('Modo: gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar.');
+      nota('Teste 4 · gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar. ' + diagnostico());
       comecarGravacao();
     } catch (e) {
       conversando = false;
@@ -213,7 +235,7 @@
     clearInterval(timer);
     try { rec && rec.stop(); } catch (e) { /* já parou */ }
     rec = null;
-    try { gravador && gravador.state !== 'inactive' && (gravador.onstop = null, gravador.stop()); } catch (e) { /* já parou */ }
+    soltarMicrofone();
     estado('Toque no círculo para começar');
   }
 
