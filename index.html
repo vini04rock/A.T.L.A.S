@@ -31,77 +31,88 @@
   <button class="circulo" id="circulo" aria-label="Conversar"></button>
   <div class="estado" id="estado">Toque no círculo para começar</div>
   <div class="fala" id="fala"></div>
-  <div class="nota" id="nota">Teste de voz: fale algo e eu repito. Diga "tchau" para parar.</div>
+  <div class="nota" id="nota">Teste 2: toque no círculo e fale. Diga "tchau" para parar.</div>
 <script>
-  // Teste do reconhecimento de voz do Safari: escuta em pt-BR, repete falando e volta a escutar sozinho, até "tchau"
+  // Teste 2 do reconhecimento de voz do Safari: o iPhone só abre o microfone no instante do toque. Então começa a ouvir
+  // no próprio toque e fica ouvindo (continuous); enquanto fala, ignora o que ouvir. Se a escuta cair, tenta voltar sozinha
+  // e, se o iPhone não deixar, pede um toque. Mostra em que passo deu erro.
   const $ = id => document.getElementById(id);
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let conversando = false;
+  let r = null, conversando = false, falando = false, voltas = 0;
 
   function estado(t, classe) {
     $('estado').textContent = t;
     $('circulo').className = 'circulo' + (classe ? ' ' + classe : '');
   }
+  function nota(t) { $('nota').textContent = t; }
 
   function falar(texto, depois) {
     if (!window.speechSynthesis) { depois && depois(); return; }
+    falando = true;
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
     const voz = speechSynthesis.getVoices().find(v => /^pt(-|_)BR/i.test(v.lang));
     if (voz) f.voice = voz;
-    f.onend = () => depois && depois();
-    f.onerror = () => depois && depois();
+    const fim = () => { falando = false; if (conversando) estado('Ouvindo…', 'ouvindo'); depois && depois(); };
+    f.onend = fim; f.onerror = fim;
     estado('Falando…', 'falando');
     speechSynthesis.speak(f);
   }
 
-  function ouvir() {
-    if (!conversando) return;
-    const r = new Reconhecimento();
+  function responder(texto) {
+    if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) {
+      parar();
+      falar('Até mais!', () => estado('Toque no círculo para começar'));
+      return;
+    }
+    falar('Você disse: ' + texto);
+  }
+
+  function comecar(passo) {
+    r = new Reconhecimento();
     r.lang = 'pt-BR';
     r.interimResults = true;
-    r.continuous = false;
-    let final = '';
+    r.continuous = true;
     r.onresult = ev => {
+      if (falando) return; // o que ele mesmo fala não conta
       let parcial = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) final += ev.results[i][0].transcript; else parcial += ev.results[i][0].transcript;
+        const t = ev.results[i][0].transcript.trim();
+        if (ev.results[i].isFinal) { $('fala').innerHTML = '<small>Você</small>' + t; if (t) responder(t); }
+        else parcial += t;
       }
-      $('fala').innerHTML = '<small>Você</small>' + (final || parcial);
+      if (parcial) $('fala').innerHTML = '<small>Você</small>' + parcial;
     };
     r.onerror = ev => {
-      if (ev.error === 'no-speech') return; // o onend tenta de novo
-      conversando = false;
-      estado('Erro do reconhecimento: ' + ev.error);
-      $('nota').textContent = ev.error === 'not-allowed' ? 'O microfone foi bloqueado. Libere em Ajustes → Safari → Microfone.' : 'Me conte esse erro.';
+      if (ev.error === 'no-speech' || ev.error === 'aborted') return;
+      nota(`Erro no passo "${passo}": ${ev.error}` + (ev.error === 'service-not-allowed' || ev.error === 'not-allowed'
+        ? '. Confira Ajustes → Geral → Teclado → Ditado (ligado) e Ajustes → Safari → Microfone (Permitir).' : ''));
+      if (passo !== 'toque') conversando = false;
     };
     r.onend = () => {
       if (!conversando) return;
-      const texto = final.trim();
-      if (!texto) { ouvir(); return; }
-      if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) {
-        conversando = false;
-        falar('Até mais!', () => estado('Toque no círculo para começar'));
-        return;
-      }
-      falar('Você disse: ' + texto, () => ouvir());
+      voltas++;
+      try { comecar('voltar sozinho ' + voltas); r.start(); }
+      catch (e) { conversando = false; estado('Toque no círculo para continuar'); nota('Voltar sozinho não deu: ' + e.message); }
     };
-    estado('Ouvindo…', 'ouvindo');
-    try { r.start(); } catch (e) { estado('Não deu para ouvir: ' + e.message); conversando = false; }
+    r.start();
+  }
+
+  function parar() {
+    conversando = false;
+    try { r && r.stop(); } catch (e) { /* já parou */ }
   }
 
   $('circulo').addEventListener('click', () => {
-    if (!Reconhecimento) {
-      estado('Este navegador não tem reconhecimento de voz');
-      $('nota').textContent = 'Abra pelo Safari do iPhone. Se já estiver no Safari, me conte essa mensagem.';
-      return;
-    }
-    if (conversando) { conversando = false; speechSynthesis.cancel(); estado('Toque no círculo para começar'); return; }
+    if (!Reconhecimento) { estado('Este navegador não tem reconhecimento de voz'); nota('Abra pelo Safari do iPhone.'); return; }
+    if (conversando) { parar(); speechSynthesis.cancel(); estado('Toque no círculo para começar'); return; }
     conversando = true;
+    voltas = 0;
     const modo = window.navigator.standalone ? 'app da tela de início' : 'navegador';
-    $('nota').textContent = 'Teste de voz (' + modo + '): fale algo e eu repito. Diga "tchau" para parar.';
-    falar('Oi! Pode falar.', () => ouvir());
+    nota(`Teste 2 (${modo}): fale algo e eu repito. Diga "tchau" para parar.`);
+    try { comecar('toque'); estado('Ouvindo…', 'ouvindo'); }
+    catch (e) { conversando = false; nota('Não abriu o microfone: ' + e.message); }
   });
 </script>
 </body>
