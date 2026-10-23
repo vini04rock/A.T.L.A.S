@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="theme-color" content="#05070a">
+<title>Jarvis</title>
+<style>
+  :root { --fundo: #05070a; --texto: #e8edf2; --suave: #7d8a96; --luz: 120, 190, 255; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
+               font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 24px 16px;
+         padding-top: calc(24px + env(safe-area-inset-top)); padding-bottom: calc(24px + env(safe-area-inset-bottom)); text-align: center; }
+  .circulo { width: 168px; height: 168px; border-radius: 50%; border: 0; cursor: pointer; background:
+             radial-gradient(circle at 50% 45%, rgba(var(--luz), .55), rgba(var(--luz), .12) 60%, rgba(var(--luz), .04) 72%);
+             box-shadow: 0 0 60px rgba(var(--luz), .25), inset 0 0 30px rgba(var(--luz), .35); transition: transform .3s ease; }
+  .circulo.ouvindo { animation: pulsa 1.4s ease-in-out infinite; }
+  .circulo.falando { animation: pulsa .7s ease-in-out infinite; --luz: 160, 230, 255; }
+  @keyframes pulsa { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  .estado { font-size: 15px; color: var(--suave); min-height: 20px; letter-spacing: .02em; }
+  .fala { font-size: 19px; line-height: 1.45; max-width: 520px; min-height: 56px; }
+  .fala small { display: block; font-size: 13px; color: var(--suave); margin-bottom: 6px; }
+  .nota { font-size: 12px; color: var(--suave); max-width: 420px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <button class="circulo" id="circulo" aria-label="Conversar"></button>
+  <div class="estado" id="estado">Toque no círculo para começar</div>
+  <div class="fala" id="fala"></div>
+  <div class="nota" id="nota">Teste de voz: fale algo e eu repito. Diga "tchau" para parar.</div>
+<script>
+  // Teste do reconhecimento de voz do Safari: escuta em pt-BR, repete falando e volta a escutar sozinho, até "tchau"
+  const $ = id => document.getElementById(id);
+  const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let conversando = false;
+
+  function estado(t, classe) {
+    $('estado').textContent = t;
+    $('circulo').className = 'circulo' + (classe ? ' ' + classe : '');
+  }
+
+  function falar(texto, depois) {
+    if (!window.speechSynthesis) { depois && depois(); return; }
+    speechSynthesis.cancel();
+    const f = new SpeechSynthesisUtterance(texto);
+    f.lang = 'pt-BR';
+    const voz = speechSynthesis.getVoices().find(v => /^pt(-|_)BR/i.test(v.lang));
+    if (voz) f.voice = voz;
+    f.onend = () => depois && depois();
+    f.onerror = () => depois && depois();
+    estado('Falando…', 'falando');
+    speechSynthesis.speak(f);
+  }
+
+  function ouvir() {
+    if (!conversando) return;
+    const r = new Reconhecimento();
+    r.lang = 'pt-BR';
+    r.interimResults = true;
+    r.continuous = false;
+    let final = '';
+    r.onresult = ev => {
+      let parcial = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) final += ev.results[i][0].transcript; else parcial += ev.results[i][0].transcript;
+      }
+      $('fala').innerHTML = '<small>Você</small>' + (final || parcial);
+    };
+    r.onerror = ev => {
+      if (ev.error === 'no-speech') return; // o onend tenta de novo
+      conversando = false;
+      estado('Erro do reconhecimento: ' + ev.error);
+      $('nota').textContent = ev.error === 'not-allowed' ? 'O microfone foi bloqueado. Libere em Ajustes → Safari → Microfone.' : 'Me conte esse erro.';
+    };
+    r.onend = () => {
+      if (!conversando) return;
+      const texto = final.trim();
+      if (!texto) { ouvir(); return; }
+      if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) {
+        conversando = false;
+        falar('Até mais!', () => estado('Toque no círculo para começar'));
+        return;
+      }
+      falar('Você disse: ' + texto, () => ouvir());
+    };
+    estado('Ouvindo…', 'ouvindo');
+    try { r.start(); } catch (e) { estado('Não deu para ouvir: ' + e.message); conversando = false; }
+  }
+
+  $('circulo').addEventListener('click', () => {
+    if (!Reconhecimento) {
+      estado('Este navegador não tem reconhecimento de voz');
+      $('nota').textContent = 'Abra pelo Safari do iPhone. Se já estiver no Safari, me conte essa mensagem.';
+      return;
+    }
+    if (conversando) { conversando = false; speechSynthesis.cancel(); estado('Toque no círculo para começar'); return; }
+    conversando = true;
+    const modo = window.navigator.standalone ? 'app da tela de início' : 'navegador';
+    $('nota').textContent = 'Teste de voz (' + modo + '): fale algo e eu repito. Diga "tchau" para parar.';
+    falar('Oi! Pode falar.', () => ouvir());
+  });
+</script>
+</body>
+</html>
