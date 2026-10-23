@@ -26,6 +26,8 @@
   .fala { font-size: 19px; line-height: 1.45; max-width: 520px; min-height: 56px; }
   .fala small { display: block; font-size: 13px; color: var(--suave); margin-bottom: 6px; }
   .nota { font-size: 12px; color: var(--suave); max-width: 440px; line-height: 1.5; }
+  .abrir { display: block; width: fit-content; margin: 16px auto 0; padding: 11px 28px; border-radius: 14px; font-size: 15px; font-weight: 600;
+           color: var(--texto); text-decoration: none; background: rgba(var(--luz), .22); border: 1px solid rgba(var(--luz), .35); }
   .config { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 440px; }
   .config input { width: 100%; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,.15); background: #0e1318;
                   color: var(--texto); font-size: 15px; }
@@ -123,6 +125,12 @@
         }
         if (!r.fala) { depois && depois(); return; }
         $('fala').innerHTML += '<small style="margin-top:14px">Atlas</small>' + String(r.fala).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        // "abre a carteira nos objetivos": um botão para abrir a Casa já na tela (o iPhone só abre outra página com um toque)
+        if (r.abrir && /^https:\/\/script\.google\.com\//.test(r.abrir)) {
+          const a = document.createElement('a');
+          a.className = 'abrir'; a.href = r.abrir; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Abrir';
+          $('fala').appendChild(a);
+        }
         falar(r.fala, depois);
       })
       .catch(e => { enviando = false; nota('Sem conexão com a Casa: ' + e.message); depois && depois(); });
