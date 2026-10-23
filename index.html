@@ -13,106 +13,215 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
                font-family: -apple-system, "SF Pro Display", BlinkMacSystemFont, system-ui, sans-serif; }
-  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 24px 16px;
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; padding: 24px 16px;
          padding-top: calc(24px + env(safe-area-inset-top)); padding-bottom: calc(24px + env(safe-area-inset-bottom)); text-align: center; }
   .circulo { width: 168px; height: 168px; border-radius: 50%; border: 0; cursor: pointer; background:
              radial-gradient(circle at 50% 45%, rgba(var(--luz), .55), rgba(var(--luz), .12) 60%, rgba(var(--luz), .04) 72%);
-             box-shadow: 0 0 60px rgba(var(--luz), .25), inset 0 0 30px rgba(var(--luz), .35); transition: transform .3s ease; }
-  .circulo.ouvindo { animation: pulsa 1.4s ease-in-out infinite; }
-  .circulo.falando { animation: pulsa .7s ease-in-out infinite; --luz: 160, 230, 255; }
-  @keyframes pulsa { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+             box-shadow: 0 0 60px rgba(var(--luz), .25), inset 0 0 30px rgba(var(--luz), .35); transition: transform .12s ease; }
+  .circulo.ouvindo { animation: pulsa 1.6s ease-in-out infinite; }
+  .circulo.pensando { animation: pulsa .9s ease-in-out infinite; --luz: 200, 170, 255; }
+  .circulo.falando { animation: pulsa .6s ease-in-out infinite; --luz: 160, 230, 255; }
+  @keyframes pulsa { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
   .estado { font-size: 15px; color: var(--suave); min-height: 20px; letter-spacing: .02em; }
   .fala { font-size: 19px; line-height: 1.45; max-width: 520px; min-height: 56px; }
   .fala small { display: block; font-size: 13px; color: var(--suave); margin-bottom: 6px; }
-  .nota { font-size: 12px; color: var(--suave); max-width: 420px; line-height: 1.5; }
+  .nota { font-size: 12px; color: var(--suave); max-width: 440px; line-height: 1.5; }
+  .config { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 440px; }
+  .config input { width: 100%; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,.15); background: #0e1318;
+                  color: var(--texto); font-size: 15px; }
+  .config button { padding: 13px; border-radius: 14px; border: 0; background: rgba(var(--luz), .25); color: var(--texto); font-size: 15px; font-weight: 600; }
+  body.sem-chave .config { display: flex; } body.sem-chave .circulo, body.sem-chave .estado, body.sem-chave .fala { display: none; }
 </style>
 </head>
 <body>
+  <div class="config">
+    <div>Na Casa, escreva <b>link da siri</b> na caixa de comando, copie o link e cole aqui (só na primeira vez).</div>
+    <input id="link" type="url" placeholder="Cole o seu link aqui" autocomplete="off">
+    <button id="salvar" type="button">Salvar</button>
+  </div>
   <button class="circulo" id="circulo" aria-label="Conversar"></button>
   <div class="estado" id="estado">Toque no círculo para começar</div>
   <div class="fala" id="fala"></div>
-  <div class="nota" id="nota">Teste 2: toque no círculo e fale. Diga "tchau" para parar.</div>
+  <div class="nota" id="nota"></div>
 <script>
-  // Teste 2 do reconhecimento de voz do Safari: o iPhone só abre o microfone no instante do toque. Então começa a ouvir
-  // no próprio toque e fica ouvindo (continuous); enquanto fala, ignora o que ouvir. Se a escuta cair, tenta voltar sozinha
-  // e, se o iPhone não deixar, pede um toque. Mostra em que passo deu erro.
+  // Teste 3 do A.T.L.A.S.: conversa contínua por voz. No computador (Chrome) o próprio navegador reconhece a voz; no
+  // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para ser
+  // transcrito na Carteira (Whisper, na Groq). Por enquanto só repete o que ouviu.
+  const VOZ_URL = 'https:/' + '/script.google.com/macros/s/AKfycby_BLepVFo1I3dpCglAWf_1HNjwlLuhlvj2p8RDR5r5KOoR2tbLPlS6G-ECN8wEvW7uRA/exec';
   const $ = id => document.getElementById(id);
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let r = null, conversando = false, falando = false, voltas = 0;
+  const ehIphone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const guardar = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* sem guardar */ } };
+  const ler = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  let chave = ler('atlas-k');
+  let conversando = false, falando = false;
 
-  function estado(t, classe) {
-    $('estado').textContent = t;
-    $('circulo').className = 'circulo' + (classe ? ' ' + classe : '');
-  }
+  function estado(t, classe) { $('estado').textContent = t; $('circulo').className = 'circulo' + (classe ? ' ' + classe : ''); }
   function nota(t) { $('nota').textContent = t; }
+  function mostrarFala(quem, t) { $('fala').innerHTML = '<small>' + quem + '</small>' + String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+  // ---------- a chave (do link da Siri) ----------
+  function pedirChave() { document.body.classList.toggle('sem-chave', !chave); }
+  $('salvar').addEventListener('click', () => {
+    const t = $('link').value.trim();
+    const m = /[?&]k=([^&#\s]+)/.exec(t);
+    const k = m ? decodeURIComponent(m[1]) : (/^[A-Za-z0-9_-]{20,}$/.test(t) ? t : '');
+    if (!k) { alert('Não achei a chave nesse link. Copie o link inteiro, do https até o &t='); return; }
+    chave = k; guardar('atlas-k', k); pedirChave();
+  });
+  pedirChave();
+
+  // ---------- falar ----------
   function falar(texto, depois) {
-    if (!window.speechSynthesis) { depois && depois(); return; }
+    const fim = () => { falando = false; depois && depois(); };
+    if (!window.speechSynthesis || !texto) { fim(); return; }
     falando = true;
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
     const voz = speechSynthesis.getVoices().find(v => /^pt(-|_)BR/i.test(v.lang));
     if (voz) f.voice = voz;
-    const fim = () => { falando = false; if (conversando) estado('Ouvindo…', 'ouvindo'); depois && depois(); };
     f.onend = fim; f.onerror = fim;
     estado('Falando…', 'falando');
     speechSynthesis.speak(f);
   }
 
-  function responder(texto) {
-    if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) {
-      parar();
-      falar('Até mais!', () => estado('Toque no círculo para começar'));
-      return;
-    }
-    falar('Você disse: ' + texto);
+  // ---------- o que fazer com o que ouviu (no teste: repetir) ----------
+  function responder(texto, depois) {
+    mostrarFala('Você', texto);
+    if (/\b(tchau|valeu|obrigado|pode parar)\b/i.test(texto)) { parar(); falar('Até mais!', () => estado('Toque no círculo para começar')); return; }
+    falar('Você disse: ' + texto, depois);
   }
 
-  function comecar(passo) {
-    r = new Reconhecimento();
-    r.lang = 'pt-BR';
-    r.interimResults = true;
-    r.continuous = true;
-    r.onresult = ev => {
-      if (falando) return; // o que ele mesmo fala não conta
-      let parcial = '';
+  // ---------- modo 1: o navegador reconhece (Chrome do computador) ----------
+  let rec = null;
+  function ouvirPeloNavegador() {
+    rec = new Reconhecimento();
+    rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
+    rec.onresult = ev => {
+      if (falando) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript.trim();
-        if (ev.results[i].isFinal) { $('fala').innerHTML = '<small>Você</small>' + t; if (t) responder(t); }
-        else parcial += t;
+        if (ev.results[i].isFinal) { if (t) responder(t, () => conversando && estado('Ouvindo…', 'ouvindo')); }
+        else mostrarFala('Você', t);
       }
-      if (parcial) $('fala').innerHTML = '<small>Você</small>' + parcial;
     };
-    r.onerror = ev => {
+    rec.onerror = ev => {
       if (ev.error === 'no-speech' || ev.error === 'aborted') return;
-      nota(`Erro no passo "${passo}": ${ev.error}` + (ev.error === 'service-not-allowed' || ev.error === 'not-allowed'
-        ? '. Confira Ajustes → Geral → Teclado → Ditado (ligado) e Ajustes → Safari → Microfone (Permitir).' : ''));
-      if (passo !== 'toque') conversando = false;
+      if (ev.error === 'service-not-allowed' || ev.error === 'not-allowed') { rec = null; nota('O navegador não deixou: vou gravar e transcrever.'); ouvirGravando(); return; }
+      nota('Erro do reconhecimento: ' + ev.error);
     };
-    r.onend = () => {
-      if (!conversando) return;
-      voltas++;
-      try { comecar('voltar sozinho ' + voltas); r.start(); }
-      catch (e) { conversando = false; estado('Toque no círculo para continuar'); nota('Voltar sozinho não deu: ' + e.message); }
-    };
-    r.start();
+    rec.onend = () => { if (conversando && rec) try { rec.start(); } catch (e) { /* tenta no próximo toque */ } };
+    rec.start();
+    estado('Ouvindo…', 'ouvindo');
+    nota('Modo: reconhecimento do navegador. Diga "tchau" para parar.');
   }
 
+  // ---------- modo 2: gravar e transcrever (iPhone) ----------
+  let fluxo = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null;
+  let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false;
+  const SILENCIO_MS = 1100, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
+
+  function tipoDoAudio() {
+    const tipos = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+    return tipos.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+  }
+
+  function comecarGravacao() {
+    if (!conversando || falando || enviando || !fluxo) return;
+    pedacos = [];
+    const tipo = tipoDoAudio();
+    gravador = new MediaRecorder(fluxo, tipo ? { mimeType: tipo } : undefined);
+    gravador.ondataavailable = ev => { if (ev.data && ev.data.size) pedacos.push(ev.data); };
+    gravador.start();
+    inicioGravacao = Date.now(); falouAgora = false;
+    estado('Ouvindo…', 'ouvindo');
+  }
+
+  function pararGravacao(enviar) {
+    if (!gravador || gravador.state === 'inactive') return;
+    const g = gravador;
+    g.onstop = () => {
+      if (!enviar) { comecarGravacao(); return; }
+      const blob = new Blob(pedacos, { type: g.mimeType || tipoDoAudio() || 'audio/mp4' });
+      transcrever(blob);
+    };
+    g.stop();
+  }
+
+  function nivel() {
+    const dados = new Uint8Array(analisador.fftSize);
+    analisador.getByteTimeDomainData(dados);
+    let soma = 0;
+    for (let i = 0; i < dados.length; i++) { const v = (dados[i] - 128) / 128; soma += v * v; }
+    return Math.sqrt(soma / dados.length);
+  }
+
+  function vigiar() {
+    if (!conversando) return;
+    if (gravador && gravador.state === 'recording' && !falando && !enviando) {
+      const n = nivel(), agora = Date.now();
+      const limiar = Math.max(0.02, ruido * 3);
+      if (n > limiar) { falouAgora = true; ultimaVoz = agora; }
+      else if (!falouAgora) ruido = ruido * 0.95 + n * 0.05; // aprende o barulho do ambiente
+      if (falouAgora && (agora - ultimaVoz > SILENCIO_MS || agora - inicioGravacao > MAX_FALA_MS)) pararGravacao(true);
+      else if (!falouAgora && agora - inicioGravacao > REINICIO_MS) pararGravacao(false); // só silêncio: recomeça
+    }
+  }
+
+  function transcrever(blob) {
+    enviando = true;
+    estado('Entendendo…', 'pensando');
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      const audio = String(leitor.result).split(',')[1] || '';
+      fetch(VOZ_URL, { method: 'POST', body: JSON.stringify({ app: 'atlas', k: chave, audio, tipo: blob.type, modo: 'teste' }) })
+        .then(r => r.json())
+        .then(r => {
+          enviando = false;
+          if (r.erro) { nota(r.erro); if (/chave/i.test(r.erro)) { chave = ''; guardar('atlas-k', null); pedirChave(); parar(); return; } comecarGravacao(); return; }
+          if (!r.texto) { comecarGravacao(); return; }
+          responder(r.texto, () => comecarGravacao());
+        })
+        .catch(e => { enviando = false; nota('Sem conexão com a Carteira: ' + e.message); comecarGravacao(); });
+    };
+    leitor.readAsDataURL(blob);
+  }
+
+  async function ouvirGravando() {
+    try {
+      if (!fluxo) fluxo = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        analisador = ctx.createAnalyser(); analisador.fftSize = 1024;
+        ctx.createMediaStreamSource(fluxo).connect(analisador);
+      }
+      if (ctx.state === 'suspended') await ctx.resume();
+      clearInterval(timer); timer = setInterval(vigiar, 60);
+      nota('Modo: gravação + transcrição (' + (tipoDoAudio() || 'formato padrão') + '). Diga "tchau" para parar.');
+      comecarGravacao();
+    } catch (e) {
+      conversando = false;
+      estado('Toque no círculo para começar');
+      nota('Não abriu o microfone: ' + e.message + '. Confira Ajustes → Safari → Microfone.');
+    }
+  }
+
+  // ---------- começar / parar ----------
   function parar() {
     conversando = false;
-    try { r && r.stop(); } catch (e) { /* já parou */ }
+    clearInterval(timer);
+    try { rec && rec.stop(); } catch (e) { /* já parou */ }
+    rec = null;
+    try { gravador && gravador.state !== 'inactive' && (gravador.onstop = null, gravador.stop()); } catch (e) { /* já parou */ }
+    estado('Toque no círculo para começar');
   }
 
   $('circulo').addEventListener('click', () => {
-    if (!Reconhecimento) { estado('Este navegador não tem reconhecimento de voz'); nota('Abra pelo Safari do iPhone.'); return; }
-    if (conversando) { parar(); speechSynthesis.cancel(); estado('Toque no círculo para começar'); return; }
+    if (conversando) { parar(); if (window.speechSynthesis) speechSynthesis.cancel(); return; }
     conversando = true;
-    voltas = 0;
-    const modo = window.navigator.standalone ? 'app da tela de início' : 'navegador';
-    nota(`Teste 2 (${modo}): fale algo e eu repito. Diga "tchau" para parar.`);
-    try { comecar('toque'); estado('Ouvindo…', 'ouvindo'); }
-    catch (e) { conversando = false; nota('Não abriu o microfone: ' + e.message); }
+    if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance('')); // libera a voz no toque (iPhone)
+    if (Reconhecimento && !ehIphone) ouvirPeloNavegador(); else ouvirGravando();
   });
 </script>
 </body>
