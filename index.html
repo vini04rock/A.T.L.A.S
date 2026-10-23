@@ -171,7 +171,7 @@
   let fluxo = null, fonte = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null, modoGravacao = false;
   let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false, vozSeguida = 0;
   const VOZ_MINIMA_MS = 250; // barulho curto (porta, buzina) não conta como fala
-  const SILENCIO_MS = 850, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
+  const SILENCIO_MS = 1000, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
 
   function tipoDoAudio() {
     const tipos = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
