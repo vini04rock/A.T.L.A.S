@@ -71,7 +71,7 @@
     const m = /[?&]k=([^&#\s]+)/.exec(t);
     const k = m ? decodeURIComponent(m[1]) : (/^[A-Za-z0-9_-]{20,}$/.test(t) ? t : '');
     if (!k) { alert('Não achei a chave nesse link. Copie o link inteiro, do https até o &t='); return; }
-    chave = k; guardar('atlas-k', k); pedirChave();
+    chave = k; guardar('atlas-k', k); pedirChave(); aquecer();
   });
   pedirChave();
 
@@ -146,7 +146,7 @@
     rec = new Reconhecimento();
     rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
     rec.onresult = ev => {
-      if (falando) return;
+      if (falando || enviando) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript.trim();
         if (ev.results[i].isFinal && t) {
@@ -171,7 +171,7 @@
   let fluxo = null, fonte = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null, modoGravacao = false;
   let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false, vozSeguida = 0;
   const VOZ_MINIMA_MS = 250; // barulho curto (porta, buzina) não conta como fala
-  const SILENCIO_MS = 1000, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
+  const SILENCIO_MS = 800, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
 
   function tipoDoAudio() {
     const tipos = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
@@ -281,6 +281,16 @@
     soltarMicrofone();
     estado('Toque no círculo para começar');
   }
+
+  // Acorda o Apps Script antes do primeiro toque. Não chama a IA nem transcreve áudio.
+  let aquecidoEm = 0;
+  function aquecer() {
+    if (!chave || Date.now() - aquecidoEm < 5 * 60 * 1000) return;
+    aquecidoEm = Date.now();
+    fetch(VOZ_URL, { method: 'POST', body: JSON.stringify({ app: 'atlas', k: chave, aquecer: true }) }).catch(() => {});
+  }
+  aquecer();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') aquecer(); });
 
   $('circulo').addEventListener('click', () => {
     if (conversando) { parar(); if (window.speechSynthesis) speechSynthesis.cancel(); return; }
