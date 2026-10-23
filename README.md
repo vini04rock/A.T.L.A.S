@@ -5,4 +5,6 @@ O app de voz da Casa (fala-se "Atlas"): uma página só (GitHub Pages) que escut
 
 Como funciona: toque no círculo e converse. Ele cumprimenta, ouve, responde falando e volta a ouvir sozinho até
 "tchau". No computador (Chrome) o navegador reconhece a voz; no iPhone a página grava e a Carteira transcreve
-(Whisper, na Groq). Na primeira vez, cole o "link da siri" (da caixa de comando da Casa).
+(Whisper, na Groq). No computador, você pode começar a falar por cima para interromper uma resposta. No iPhone,
+toque no círculo enquanto ele fala e diga o próximo pedido imediatamente. Na primeira vez, cole o "link da siri"
+(da caixa de comando da Casa).

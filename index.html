@@ -56,7 +56,7 @@
   const guardar = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* sem guardar */ } };
   const ler = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
   let chave = ler('atlas-k');
-  let conversando = false, falando = false, nome = ler('atlas-nome');
+  let conversando = false, falando = false, nome = ler('atlas-nome'), falaId = 0, falaAtual = '';
   const FIM_CONVERSA = /\b(tchau|ate mais|ate logo|ate depois|pode parar|encerrar|desligar)\b/;
   const semAcento = x => String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -76,10 +76,37 @@
   pedirChave();
 
   // ---------- falar ----------
+  function textoComparavel(t) { return semAcento(t).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function pareceEcoDoAtlas(t) {
+    const ouvido = textoComparavel(t), dito = textoComparavel(falaAtual);
+    if (!ouvido || !dito) return false;
+    if (ouvido.length >= 8 && dito.includes(ouvido)) return true;
+    const palavras = ouvido.split(' ').filter(p => p.length > 2);
+    return palavras.length >= 3 && palavras.filter(p => dito.split(' ').includes(p)).length / palavras.length >= 0.8;
+  }
+
+  function interromperFala() {
+    if (!falando) return false;
+    falaId++; // invalida o onend da fala cortada para ele não reiniciar duas vezes
+    falando = false;
+    falaAtual = '';
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (!conversando || enviando) return true;
+    if (Reconhecimento && !ehIphone) estado('Ouvindo…', 'ouvindo');
+    else ouvirGravando();
+    return true;
+  }
+
   function falar(texto, depois) {
-    const fim = () => { falando = false; depois && depois(); };
+    const id = ++falaId;
+    const fim = () => {
+      if (id !== falaId) return;
+      falando = false; falaAtual = '';
+      depois && depois();
+    };
     if (!window.speechSynthesis || !texto) { fim(); return; }
     falando = true;
+    falaAtual = texto;
     soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
     try { ctx && ctx.state === 'running' && ctx.suspend(); } catch (e) { /* segue */ } // o áudio da página pausa: a voz não falha
     speechSynthesis.cancel();
@@ -89,7 +116,7 @@
     const voz = vozPortugues();
     if (voz) f.voice = voz;
     f.onend = fim; f.onerror = fim;
-    estado('Falando…', 'falando');
+    estado('Falando… toque para interromper', 'falando');
     speechSynthesis.speak(f);
   }
 
@@ -146,9 +173,11 @@
     rec = new Reconhecimento();
     rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
     rec.onresult = ev => {
-      if (falando || enviando) return;
+      if (enviando) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript.trim();
+        if (falando && pareceEcoDoAtlas(t)) continue;
+        if (falando && t) interromperFala();
         if (ev.results[i].isFinal && t) {
           if (FIM_CONVERSA.test(semAcento(t))) { mostrarFala('Você', t); despedir(); return; }
           pensar({ t }, () => conversando && estado('Ouvindo…', 'ouvindo'));
@@ -293,6 +322,7 @@
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') aquecer(); });
 
   $('circulo').addEventListener('click', () => {
+    if (falando) { interromperFala(); return; }
     if (conversando) { parar(); if (window.speechSynthesis) speechSynthesis.cancel(); return; }
     conversando = true;
     if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance('')); // libera a voz no toque (iPhone)
