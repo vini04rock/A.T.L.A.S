@@ -85,6 +85,7 @@
     speechSynthesis.cancel();
     const f = new SpeechSynthesisUtterance(texto);
     f.lang = 'pt-BR';
+    f.rate = 1.08; // um pouco mais rápido: menos arrastado
     const voz = vozPortugues();
     if (voz) f.voice = voz;
     f.onend = fim; f.onerror = fim;
@@ -94,8 +95,11 @@
 
   /** A voz em português: a "Melhorada" (ou Premium) quando foi baixada no aparelho; senão, a primeira pt-BR. */
   function vozPortugues() {
+    // A mais natural que o aparelho tiver: as "Natural" do Edge (Francisca, Antônio), as Premium/Melhoradas do iPhone, a do Google
     const vozes = speechSynthesis.getVoices().filter(v => /^pt(-|_)BR/i.test(v.lang));
-    return vozes.find(v => /melhorad|aprimorad|enhanced|premium/i.test(v.name)) || vozes.find(v => /luciana/i.test(v.name)) || vozes[0] || null;
+    const nota = v => (/natural|neural/i.test(v.name) ? 5 : /premium/i.test(v.name) ? 4 : /melhorad|aprimorad|enhanced/i.test(v.name) ? 3
+      : /google/i.test(v.name) ? 2 : /luciana|felipe/i.test(v.name) ? 1 : 0);
+    return vozes.sort((a, b) => nota(b) - nota(a))[0] || null;
   }
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 
@@ -167,7 +171,7 @@
   let fluxo = null, fonte = null, ctx = null, analisador = null, gravador = null, pedacos = [], timer = null, modoGravacao = false;
   let falouAgora = false, ultimaVoz = 0, inicioGravacao = 0, ruido = 0.01, enviando = false, vozSeguida = 0;
   const VOZ_MINIMA_MS = 250; // barulho curto (porta, buzina) não conta como fala
-  const SILENCIO_MS = 1100, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
+  const SILENCIO_MS = 850, MAX_FALA_MS = 20000, REINICIO_MS = 12000;
 
   function tipoDoAudio() {
     const tipos = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
