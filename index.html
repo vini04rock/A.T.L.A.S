@@ -56,7 +56,7 @@
   const guardar = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* sem guardar */ } };
   const ler = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
   let chave = ler('atlas-k');
-  let conversando = false, falando = false, nome = ler('atlas-nome'), falaId = 0, falaAtual = '';
+  let conversando = false, falando = false, nome = ler('atlas-nome'), falaId = 0, falaAtual = '', audioAtual = null;
   const FIM_CONVERSA = /\b(tchau|ate mais|ate logo|ate depois|pode parar|encerrar|desligar)\b/;
   const semAcento = x => String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -90,6 +90,7 @@
     falaId++; // invalida o onend da fala cortada para ele não reiniciar duas vezes
     falando = false;
     falaAtual = '';
+    pararAudioNeural();
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (!conversando || enviando) return true;
     if (Reconhecimento && !ehIphone) estado('Ouvindo…', 'ouvindo');
@@ -97,27 +98,54 @@
     return true;
   }
 
-  function falar(texto, depois) {
+  function pararAudioNeural() {
+    if (!audioAtual) return;
+    const a = audioAtual;
+    audioAtual = null;
+    a.onended = null; a.onerror = null;
+    try { a.pause(); a.currentTime = 0; a.removeAttribute('src'); a.load(); } catch (e) { /* já encerrou */ }
+  }
+
+  function falar(texto, depois, audio, audioTipo) {
     const id = ++falaId;
     const fim = () => {
       if (id !== falaId) return;
+      pararAudioNeural();
       falando = false; falaAtual = '';
       depois && depois();
     };
-    if (!window.speechSynthesis || !texto) { fim(); return; }
+    if (!texto) { fim(); return; }
     falando = true;
     falaAtual = texto;
     soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
     try { ctx && ctx.state === 'running' && ctx.suspend(); } catch (e) { /* segue */ } // o áudio da página pausa: a voz não falha
-    speechSynthesis.cancel();
-    const f = new SpeechSynthesisUtterance(texto);
-    f.lang = 'pt-BR';
-    f.rate = 1.08; // um pouco mais rápido: menos arrastado
-    const voz = vozPortugues();
-    if (voz) f.voice = voz;
-    f.onend = fim; f.onerror = fim;
+    pararAudioNeural();
+    if (window.speechSynthesis) speechSynthesis.cancel();
     estado('Falando… toque para interromper', 'falando');
-    speechSynthesis.speak(f);
+    const falarPeloNavegador = () => {
+      if (id !== falaId) return;
+      if (!window.speechSynthesis) { fim(); return; }
+      speechSynthesis.cancel();
+      const f = new SpeechSynthesisUtterance(texto);
+      f.lang = 'pt-BR';
+      f.rate = 1.08;
+      const voz = vozPortugues();
+      if (voz) f.voice = voz;
+      f.onend = fim; f.onerror = fim;
+      speechSynthesis.speak(f);
+    };
+    if (audio && window.Audio) {
+      const a = new Audio('data:' + (audioTipo === 'audio/mpeg' ? audioTipo : 'audio/mpeg') + ';base64,' + audio);
+      audioAtual = a;
+      a.preload = 'auto';
+      a.setAttribute('playsinline', '');
+      a.onended = fim;
+      a.onerror = () => { if (audioAtual === a) audioAtual = null; falarPeloNavegador(); };
+      const tocando = a.play();
+      if (tocando && tocando.catch) tocando.catch(() => { if (audioAtual === a) { pararAudioNeural(); falarPeloNavegador(); } });
+      return;
+    }
+    falarPeloNavegador();
   }
 
   /** A voz em português: a "Melhorada" (ou Premium) quando foi baixada no aparelho; senão, a primeira pt-BR. */
@@ -162,7 +190,7 @@
           a.className = 'abrir'; a.href = r.abrir; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Abrir';
           $('fala').appendChild(a);
         }
-        falar(r.fala, depois);
+        falar(r.fala, depois, r.audio, r.audioTipo);
       })
       .catch(e => { enviando = false; nota('Sem conexão com a Casa: ' + e.message); depois && depois(); });
   }
