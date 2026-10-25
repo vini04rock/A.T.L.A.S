@@ -78,13 +78,7 @@
 
   // ---------- falar ----------
   function textoComparavel(t) { return semAcento(t).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
-  function pareceEcoDoAtlas(t) {
-    const ouvido = textoComparavel(t), dito = textoComparavel(falaAtual);
-    if (!ouvido || !dito) return false;
-    if (ouvido.length >= 8 && dito.includes(ouvido)) return true;
-    const palavras = ouvido.split(' ').filter(p => p.length > 2);
-    return palavras.length >= 3 && palavras.filter(p => dito.split(' ').includes(p)).length / palavras.length >= 0.8;
-  }
+  function chamouAtlas(t) { return /(^| )(atlas|a t l a s)( |$)/.test(textoComparavel(t)); }
 
   function interromperFala() {
     if (!falando) return false;
@@ -120,11 +114,11 @@
     falando = true;
     falaAtual = texto;
     soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
-    pausarReconhecimentoNoPc(); // não deixa o Atlas ouvir e interromper a própria voz nos alto-falantes
     try { ctx && ctx.state === 'running' && ctx.suspend(); } catch (e) { /* segue */ } // o áudio da página pausa: a voz não falha
     pararAudioNeural();
     if (window.speechSynthesis) speechSynthesis.cancel();
-    estado('Falando… toque para interromper', 'falando');
+    estado('Falando… diga “Atlas” ou toque para interromper', 'falando');
+    voltarAOuvirNoPc(); // durante a resposta, só ouvir "Atlas" interrompe; os demais sons são ignorados
     const falarPeloNavegador = () => {
       if (id !== falaId) return;
       if (!window.speechSynthesis) { fim(); return; }
@@ -200,18 +194,10 @@
 
   // ---------- modo 1: o navegador reconhece (Chrome do computador) ----------
   let rec = null, reinicioRec = null;
-  function pausarReconhecimentoNoPc() {
-    clearTimeout(reinicioRec);
-    if (!rec) return;
-    const atual = rec;
-    rec = null;
-    atual.onend = null;
-    try { atual.abort(); } catch (e) { /* já encerrou */ }
-  }
   function voltarAOuvirNoPc() {
-    if (!conversando || enviando || falando || !Reconhecimento || ehIphone || modoGravacao || rec) return;
+    if (!conversando || enviando || !Reconhecimento || ehIphone || modoGravacao || rec) return;
     clearTimeout(reinicioRec);
-    reinicioRec = setTimeout(() => { if (conversando && !enviando && !falando && !rec) ouvirPeloNavegador(); }, 40);
+    reinicioRec = setTimeout(() => { if (conversando && !enviando && !rec) ouvirPeloNavegador(); }, 40);
   }
   function ouvirPeloNavegador() {
     rec = new Reconhecimento();
@@ -220,7 +206,7 @@
       if (enviando) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript.trim();
-        if (falando && pareceEcoDoAtlas(t)) continue;
+        if (falando && !chamouAtlas(t)) continue;
         if (falando && t) interromperFala();
         if (ev.results[i].isFinal && t) {
           if (FIM_CONVERSA.test(semAcento(t))) { mostrarFala('Você', t); despedir(); return; }
