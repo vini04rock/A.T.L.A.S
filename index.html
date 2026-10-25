@@ -50,6 +50,7 @@
   // iPhone (o Safari não deixa), a página grava, percebe quando a pessoa parou de falar e manda o áudio para a Carteira,
   // que transcreve (Whisper, na Groq) e responde pelo mesmo cérebro da Siri (Voz.js). Ao abrir, ele cumprimenta.
   const VOZ_URL = 'https:/' + '/script.google.com/macros/s/AKfycby_BLepVFo1I3dpCglAWf_1HNjwlLuhlvj2p8RDR5r5KOoR2tbLPlS6G-ECN8wEvW7uRA/exec';
+  const debugVoz = new URLSearchParams(location.search).get('debugvoz') === '1';
   const $ = id => document.getElementById(id);
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
   const ehIphone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -167,7 +168,7 @@
   function pensar(corpo, depois) {
     enviando = true;
     estado('Pensando…', 'pensando');
-    fetch(VOZ_URL, { method: 'POST', body: JSON.stringify(Object.assign({ app: 'atlas', k: chave }, corpo)) })
+    fetch(VOZ_URL, { method: 'POST', body: JSON.stringify(Object.assign({ app: 'atlas', k: chave, debugVoz: debugVoz ? 1 : 0 }, corpo)) })
       .then(r => r.json())
       .then(r => {
         enviando = false;
@@ -177,7 +178,7 @@
           if (/chave/i.test(r.erro)) { chave = ''; guardar('atlas-k', null); pedirChave(); parar(); return; }
           depois && depois(); return;
         }
-        nota('');
+        nota(r.vozDiagnostico ? 'Diagnóstico da voz: ' + r.vozDiagnostico : '');
         if (r.texto) {
           mostrarFala('Você', r.texto);
           if (FIM_CONVERSA.test(semAcento(r.texto))) { despedir(); return; }
