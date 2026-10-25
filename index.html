@@ -94,7 +94,7 @@
     pararAudioNeural();
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (!conversando || enviando) return true;
-    if (Reconhecimento && !ehIphone) estado('Ouvindo…', 'ouvindo');
+    if (Reconhecimento && !ehIphone) { estado('Ouvindo…', 'ouvindo'); voltarAOuvirNoPc(); }
     else ouvirGravando();
     return true;
   }
@@ -114,11 +114,13 @@
       pararAudioNeural();
       falando = false; falaAtual = '';
       depois && depois();
+      voltarAOuvirNoPc();
     };
     if (!texto) { fim(); return; }
     falando = true;
     falaAtual = texto;
     soltarMicrofone(); // o iPhone corta o microfone quando o site fala: solta antes e pede de novo depois
+    pausarReconhecimentoNoPc(); // não deixa o Atlas ouvir e interromper a própria voz nos alto-falantes
     try { ctx && ctx.state === 'running' && ctx.suspend(); } catch (e) { /* segue */ } // o áudio da página pausa: a voz não falha
     pararAudioNeural();
     if (window.speechSynthesis) speechSynthesis.cancel();
@@ -197,7 +199,20 @@
   }
 
   // ---------- modo 1: o navegador reconhece (Chrome do computador) ----------
-  let rec = null;
+  let rec = null, reinicioRec = null;
+  function pausarReconhecimentoNoPc() {
+    clearTimeout(reinicioRec);
+    if (!rec) return;
+    const atual = rec;
+    rec = null;
+    atual.onend = null;
+    try { atual.abort(); } catch (e) { /* já encerrou */ }
+  }
+  function voltarAOuvirNoPc() {
+    if (!conversando || enviando || falando || !Reconhecimento || ehIphone || modoGravacao || rec) return;
+    clearTimeout(reinicioRec);
+    reinicioRec = setTimeout(() => { if (conversando && !enviando && !falando && !rec) ouvirPeloNavegador(); }, 40);
+  }
   function ouvirPeloNavegador() {
     rec = new Reconhecimento();
     rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
@@ -219,7 +234,7 @@
       if (ev.error === 'service-not-allowed' || ev.error === 'not-allowed') { rec = null; nota('O navegador não deixou: vou gravar e transcrever.'); ouvirGravando(); return; }
       nota('Erro do reconhecimento: ' + ev.error);
     };
-    rec.onend = () => { if (conversando && rec) try { rec.start(); } catch (e) { /* tenta no próximo toque */ } };
+    rec.onend = () => { rec = null; voltarAOuvirNoPc(); };
     rec.start();
     estado('Ouvindo…', 'ouvindo');
     nota('');
