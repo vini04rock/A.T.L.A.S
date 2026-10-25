@@ -193,11 +193,11 @@
   }
 
   // ---------- modo 1: o navegador reconhece (Chrome do computador) ----------
-  let rec = null, reinicioRec = null;
+  let rec = null, reinicioRec = null, maosLivresBloqueado = false;
   function voltarAOuvirNoPc() {
-    if (!conversando || enviando || !Reconhecimento || ehIphone || modoGravacao || rec) return;
+    if (!chave || enviando || !Reconhecimento || ehIphone || modoGravacao || rec || maosLivresBloqueado || document.visibilityState === 'hidden') return;
     clearTimeout(reinicioRec);
-    reinicioRec = setTimeout(() => { if (conversando && !enviando && !rec) ouvirPeloNavegador(); }, 40);
+    reinicioRec = setTimeout(() => { if (!enviando && !rec && !maosLivresBloqueado) ouvirPeloNavegador(); }, conversando ? 40 : 250);
   }
   function ouvirPeloNavegador() {
     rec = new Reconhecimento();
@@ -208,6 +208,14 @@
         const t = ev.results[i][0].transcript.trim();
         if (falando && !chamouAtlas(t)) continue;
         if (falando && t) interromperFala();
+        if (!conversando) {
+          if (!ev.results[i].isFinal || !chamouAtlas(t)) continue;
+          conversando = true;
+          mostrarFala('Você', t);
+          const soNome = /^(atlas|a t l a s)$/.test(textoComparavel(t));
+          pensar(soNome ? { inicio: true } : { t }, () => conversando && estado('Ouvindo…', 'ouvindo'));
+          continue;
+        }
         if (ev.results[i].isFinal && t) {
           if (FIM_CONVERSA.test(semAcento(t))) { mostrarFala('Você', t); despedir(); return; }
           pensar({ t }, () => conversando && estado('Ouvindo…', 'ouvindo'));
@@ -217,12 +225,16 @@
     };
     rec.onerror = ev => {
       if (ev.error === 'no-speech' || ev.error === 'aborted') return;
-      if (ev.error === 'service-not-allowed' || ev.error === 'not-allowed') { rec = null; nota('O navegador não deixou: vou gravar e transcrever.'); ouvirGravando(); return; }
+      if (ev.error === 'service-not-allowed' || ev.error === 'not-allowed') {
+        rec = null;
+        if (!conversando) { maosLivresBloqueado = true; estado('Toque no círculo para liberar o microfone'); return; }
+        nota('O navegador não deixou: vou gravar e transcrever.'); ouvirGravando(); return;
+      }
       nota('Erro do reconhecimento: ' + ev.error);
     };
     rec.onend = () => { rec = null; voltarAOuvirNoPc(); };
     rec.start();
-    estado('Ouvindo…', 'ouvindo');
+    estado(conversando ? 'Ouvindo…' : 'Diga “Atlas” para começar', 'ouvindo');
     nota('');
   }
 
@@ -338,7 +350,8 @@
     try { rec && rec.stop(); } catch (e) { /* já parou */ }
     rec = null;
     soltarMicrofone();
-    estado('Toque no círculo para começar');
+    estado(Reconhecimento && !ehIphone ? 'Diga “Atlas” para começar' : 'Toque no círculo para começar', Reconhecimento && !ehIphone ? 'ouvindo' : '');
+    voltarAOuvirNoPc();
   }
 
   // Acorda o Apps Script antes do primeiro toque. Não chama a IA nem transcreve áudio.
@@ -349,15 +362,17 @@
     fetch(VOZ_URL, { method: 'POST', body: JSON.stringify({ app: 'atlas', k: chave, aquecer: true }) }).catch(() => {});
   }
   aquecer();
+  voltarAOuvirNoPc();
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') aquecer(); });
 
   $('circulo').addEventListener('click', () => {
     if (falando) { interromperFala(); return; }
     if (conversando) { parar(); if (window.speechSynthesis) speechSynthesis.cancel(); return; }
     conversando = true;
+    maosLivresBloqueado = false;
     if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance('')); // libera a voz no toque (iPhone)
     $('fala').textContent = '';
-    if (Reconhecimento && !ehIphone) ouvirPeloNavegador(); else ouvirGravando();
+    if (Reconhecimento && !ehIphone) voltarAOuvirNoPc(); else ouvirGravando();
     pensar({ inicio: true }, () => (Reconhecimento && !ehIphone) ? estado('Ouvindo…', 'ouvindo') : comecarGravacao()); // a saudação
   });
 </script>
