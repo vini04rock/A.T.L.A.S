@@ -2,6 +2,14 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<script>
+  // Um link só (25/10/2026): o Atlas mora na Casa Web. Leva para lá com a chave já guardada aqui; ?ficar=1 fica nesta página.
+  if (!/[?&]ficar=1/.test(location.search)) {
+    let k = '';
+    try { k = localStorage.getItem('atlas-k') || ''; } catch (e) { /* sem chave guardada */ }
+    location.replace('https://casa-vini.vini04rock.workers.dev/casa.html' + (k ? '?k=' + encodeURIComponent(k) : ''));
+  }
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
